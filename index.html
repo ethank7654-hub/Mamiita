@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="mamiita">
+<title>let’s go mamiita</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#2a1a33;font-family:Georgia,"Times New Roman",serif}
+  body{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+       touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block;background:#fdf0d5}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const W = 520;               // largeur logique fixe
+  let H = 800;                 // hauteur logique : s'adapte à l'écran (portrait)
+  let GROUND = 480;            // ligne des pieds
+  let FLOOR_TOP = 462;         // haut du parquet
+  let DECOR_DY = 230;          // décalage vertical du décor
+  const G = 0.62, JUMP = -12.6;
+  const MAXV = 11.5;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+
+  function layout() {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const newH = Math.round(Math.max(640, Math.min(1150, W * vh / vw)));
+    const s = Math.min(vw / W, vh / newH);
+    const cssW = Math.floor(W * s), cssH = Math.floor(newH * s);
+    cv.style.width = cssW + 'px'; cv.style.height = cssH + 'px';
+    cv.width = Math.round(cssW * dpr); cv.height = Math.round(cssH * dpr);
+    ctx.setTransform(cv.width / W, 0, 0, cv.height / newH, 0, 0);
+    H = newH;
+    const oldG = GROUND;
+    GROUND = Math.round(H * 0.6);
+    FLOOR_TOP = GROUND - 18;
+    DECOR_DY = FLOOR_TOP - 232;
+    gy += GROUND - oldG;
+  }
+
+  /* ---------- utilitaires ---------- */
+  const rr = (x, y, w, h, r, fill, stroke) => {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+  };
+  const rect = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+  const pad = n => String(n).padStart(5, '0');
+
+  /* ---------- son ---------- */
+  let audio = null;
+  const ensureAudio = () => {
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audio && audio.state === 'suspended') audio.resume();
+  };
+  const beep = (f1, f2, dur, type = 'square', vol = 0.05) => {
+    if (!audio) return;
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f1, audio.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f2, audio.currentTime + dur);
+    g.gain.setValueAtTime(vol, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+    o.connect(g); g.connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + dur);
+  };
+
+  /* ---------- meubles ---------- */
+  function drawTable(x, b) {
+    rect(x + 6, b - 34, 6, 34, '#6b3f1d');
+    rect(x + 52, b - 34, 6, 34, '#6b3f1d');
+    rect(x, b - 42, 64, 8, '#a9713a');
+    rect(x, b - 42, 64, 3, '#c98f4e');
+    // bol posé dessus
+    ctx.fillStyle = '#e8c170';
+    ctx.beginPath(); ctx.arc(x + 32, b - 51, 9, 0, Math.PI); ctx.fill();
+    rect(x + 22, b - 52, 20, 2, '#d0a24d');
+  }
+  function drawChair(x, b) {
+    rect(x + 26, b - 26, 6, 26, '#6b3f1d');          // pied avant
+    rect(x + 4, b - 26, 5, 26, '#6b3f1d');           // pied arrière
+    rect(x + 2, b - 58, 6, 34, '#8d5a2b');           // dossier
+    rect(x + 8, b - 54, 4, 3, '#8d5a2b');
+    rect(x + 2, b - 58, 12, 5, '#a9713a');
+    rect(x + 2, b - 30, 30, 6, '#a9713a');           // assise
+    rect(x + 8, b - 34, 24, 4, '#c0392b');           // coussin
+  }
+  function drawOven(x, b) {
+    // casserole qui fume
+    rect(x + 14, b - 58, 24, 12, '#b0413e');
+    rect(x + 10, b - 55, 5, 3, '#7d2a28');
+    rect(x + 37, b - 55, 5, 3, '#7d2a28');
+    rect(x + 12, b - 60, 28, 3, '#8f3230');
+    // four
+    rr(x, b - 46, 52, 46, 4, '#cfd3d8', '#8f969e');
+    rect(x, b - 46, 52, 6, '#4a4f55');
+    ctx.fillStyle = '#e74c3c';
+    for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(x + 12 + i * 14, b - 43, 2.2, 0, 7); ctx.fill(); }
+    rect(x + 8, b - 36, 36, 3, '#8f969e');           // poignée
+    rr(x + 8, b - 32, 36, 24, 3, '#20242a');
+    rect(x + 12, b - 29, 10, 3, 'rgba(255,255,255,.25)');
+  }
+  function drawSofa(x, b) {
+    rr(x + 6, b - 44, 72, 24, 8, '#1f8a70');         // dossier
+    rr(x, b - 34, 14, 34, 6, '#176b57');             // accoudoirs
+    rr(x + 70, b - 34, 14, 34, 6, '#176b57');
+    rr(x + 10, b - 26, 64, 22, 5, '#26a688');        // assise
+    rect(x + 41, b - 26, 2, 22, '#1a7a63');          // séparation coussins
+    rect(x + 8, b - 4, 5, 4, '#4a2b14');
+    rect(x + 71, b - 4, 5, 4, '#4a2b14');
+    // petit coussin orange
+    ctx.fillStyle = '#ff9f1c';
+    ctx.beginPath(); ctx.moveTo(x + 18, b - 44); ctx.lineTo(x + 30, b - 38); ctx.lineTo(x + 24, b - 26);
+    ctx.lineTo(x + 13, b - 32); ctx.closePath(); ctx.fill();
+  }
+  function drawFridge(x, b) {
+    rr(x, b - 62, 36, 62, 5, '#e9eef2', '#9aa5ae');
+    rect(x + 1, b - 40, 34, 2, '#9aa5ae');
+    rect(x + 28, b - 56, 3, 12, '#6c7680');
+    rect(x + 28, b - 34, 3, 16, '#6c7680');
+    rect(x + 6, b - 54, 8, 8, '#ff6b6b');            // aimants
+    rect(x + 12, b - 30, 7, 7, '#4dabf7');
+  }
+  function drawCoffeeTable(x, b) {
+    rect(x + 5, b - 20, 5, 20, '#6b3f1d');
+    rect(x + 60, b - 20, 5, 20, '#6b3f1d');
+    rect(x + 8, b - 8, 54, 3, '#8d5a2b');
+    rr(x, b - 26, 70, 7, 3, '#a9713a');
+    rect(x + 10, b - 30, 24, 4, '#e74c3c');          // magazine
+    rect(x + 14, b - 33, 18, 3, '#4dabf7');
+    rect(x + 46, b - 33, 8, 7, '#f5f5f5');           // tasse
+    rect(x + 54, b - 31, 3, 3, '#f5f5f5');
+  }
+  function drawLamp(x, b) {
+    ctx.fillStyle = 'rgba(255,220,120,.22)';
+    ctx.beginPath(); ctx.ellipse(x + 13, b - 44, 20, 22, 0, 0, 7); ctx.fill();
+    rect(x + 5, b - 4, 16, 4, '#444');
+    rect(x + 12, b - 42, 3, 40, '#555');
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.moveTo(x + 2, b - 40); ctx.lineTo(x + 24, b - 40);
+    ctx.lineTo(x + 19, b - 62); ctx.lineTo(x + 7, b - 62); ctx.closePath(); ctx.fill();
+    rect(x + 6, b - 46, 14, 2, '#e0a92f');
+  }
+  function drawBed(x, b) {
+    rect(x + 2, b - 6, 6, 6, '#4a2b14');
+    rect(x + 92, b - 6, 6, 6, '#4a2b14');
+    rect(x, b - 44, 8, 40, '#8d5a2b');               // tête de lit
+    rect(x + 94, b - 26, 6, 22, '#8d5a2b');          // pied de lit
+    rect(x, b - 14, 100, 10, '#6b3f1d');
+    rr(x + 8, b - 25, 86, 12, 4, '#f5f5f5');         // matelas
+    rr(x + 34, b - 29, 60, 16, 4, '#ab47bc');        // couverture
+    rect(x + 40, b - 24, 52, 3, '#ce93d8');
+    rr(x + 10, b - 34, 24, 11, 5, '#ffffff', '#d9d9d9');   // oreiller
+  }
+  function drawBath(x, b) {
+    rect(x + 8, b - 5, 9, 5, '#c9a227');
+    rect(x + 75, b - 5, 9, 5, '#c9a227');
+    rr(x, b - 30, 92, 26, [0, 0, 16, 16], '#f4f8fb', '#9db4c6');
+    rr(x - 3, b - 35, 98, 7, 3, '#ffffff', '#9db4c6');
+    rect(x + 80, b - 47, 4, 13, '#9aa5ae');          // robinet
+    rect(x + 72, b - 47, 12, 3, '#9aa5ae');
+    ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.strokeStyle = '#b7d4ea'; ctx.lineWidth = 1.5;
+    [[22, -40, 8], [34, -43, 7], [44, -39, 6], [14, -38, 5], [54, -37, 5]].forEach(([dx, dy, r]) => {
+      ctx.beginPath(); ctx.arc(x + dx, b + dy, r, 0, 7); ctx.fill(); ctx.stroke();
+    });
+    rect(x + 10, b - 20, 70, 3, '#c9e4f5');
+  }
+  function drawTV(x, b) {
+    rr(x + 4, b - 20, 48, 20, 2, '#6b3f1d');         // meuble
+    rect(x + 27, b - 20, 2, 20, '#4a2b14');
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 2;     // antenne
+    ctx.beginPath(); ctx.moveTo(x + 28, b - 48); ctx.lineTo(x + 16, b - 58);
+    ctx.moveTo(x + 28, b - 48); ctx.lineTo(x + 40, b - 58); ctx.stroke();
+    rr(x + 2, b - 48, 52, 28, 4, '#222');
+    const cols = ['#ef5350', '#ffd54f', '#66bb6a', '#4dd0e1', '#7e57c2'];
+    cols.forEach((c, i) => rect(x + 6 + i * 8.4, b - 44, 8.4, 20, c));
+    rect(x + 6, b - 44, 42, 5, 'rgba(255,255,255,.25)');
+  }
+  function drawBookshelf(x, b) {
+    rect(x, b - 62, 44, 62, '#8d5a2b');
+    rect(x + 3, b - 59, 38, 56, '#5c3a1c');
+    const cols = ['#e53935', '#1e88e5', '#fdd835', '#43a047', '#8e24aa'];
+    for (let k = 0; k < 4; k++) {
+      const sy = b - 6 - 14 * k;
+      for (let i = 0; i < 6; i++) {
+        const h = 8 + ((i + k) % 3);
+        rect(x + 5 + i * 6, sy - h, 5, h, cols[(i + k * 2) % 5]);
+      }
+      rect(x + 3, sy, 38, 3, '#8d5a2b');
+    }
+  }
+  function drawWasher(x, b) {
+    rect(x + 3, b - 3, 6, 3, '#555'); rect(x + 35, b - 3, 6, 3, '#555');
+    rr(x, b - 48, 44, 45, 4, '#e8ecef', '#9aa5ae');
+    rect(x + 1, b - 47, 42, 8, '#cfd8dc');
+    ctx.fillStyle = '#e74c3c'; ctx.beginPath(); ctx.arc(x + 8, b - 43, 2.4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#546e7a'; ctx.beginPath(); ctx.arc(x + 17, b - 43, 2.4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#4fc3f7'; ctx.strokeStyle = '#78909c'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x + 22, b - 22, 13, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x + 22, b - 22, 8, Math.PI * 1.1, Math.PI * 1.6); ctx.stroke();
+  }
+  function drawStool(x, b) {
+    rect(x + 3, b - 27, 4, 27, '#6b3f1d');
+    rect(x + 19, b - 27, 4, 27, '#6b3f1d');
+    rect(x + 5, b - 14, 16, 3, '#6b3f1d');
+    rr(x, b - 33, 26, 7, 3, '#c1663a');
+  }
+  function drawPlantPot(x, b) {
+    ctx.fillStyle = '#43a047';
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath(); ctx.ellipse(x + 16 + i * 6, b - 34 + Math.abs(i) * 4, 5, 15, i * 0.35, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = '#c1663a';
+    ctx.beginPath(); ctx.moveTo(x + 4, b - 22); ctx.lineTo(x + 28, b - 22);
+    ctx.lineTo(x + 24, b); ctx.lineTo(x + 8, b); ctx.closePath(); ctx.fill();
+    rect(x + 3, b - 24, 26, 4, '#a24e28');
+  }
+  function drawDresser(x, b) {
+    rect(x + 4, b - 5, 6, 5, '#4a2b14'); rect(x + 50, b - 5, 6, 5, '#4a2b14');
+    rr(x, b - 42, 60, 38, 3, '#a9713a', '#6b3f1d');
+    rect(x + 3, b - 39, 54, 15, '#b98450');
+    rect(x + 3, b - 22, 54, 15, '#b98450');
+    rect(x + 26, b - 33, 8, 3, '#ffd23f');
+    rect(x + 26, b - 16, 8, 3, '#ffd23f');
+    rect(x + 8, b - 50, 12, 8, '#4dabf7');            // cadre photo
+    ctx.fillStyle = '#f48fb1'; ctx.beginPath(); ctx.arc(x + 44, b - 47, 5, 0, 7); ctx.fill();
+    rect(x + 43, b - 46, 2, 4, '#43a047');
+  }
+  function drawToilet(x, b) {
+    rr(x + 16, b - 46, 20, 26, 3, '#f7f7f7', '#c9c9c9');
+    rect(x + 20, b - 49, 12, 3, '#c9c9c9');
+    rr(x, b - 26, 34, 8, 4, '#ffffff', '#c9c9c9');
+    ctx.fillStyle = '#f7f7f7'; ctx.strokeStyle = '#c9c9c9'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x + 8, b - 18); ctx.lineTo(x + 30, b - 18);
+    ctx.lineTo(x + 26, b); ctx.lineTo(x + 12, b); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  const OB = [
+    { label: 'la table',         w: 64, h: 51, draw: drawTable },
+    { label: 'la chaise',        w: 34, h: 58, draw: drawChair },
+    { label: 'le four',          w: 52, h: 60, draw: drawOven },
+    { label: 'le canapé',        w: 84, h: 44, draw: drawSofa },
+    { label: 'le frigo',         w: 36, h: 62, draw: drawFridge },
+    { label: 'la table basse',   w: 70, h: 33, draw: drawCoffeeTable },
+    { label: 'la lampe',         w: 26, h: 62, draw: drawLamp },
+    { label: 'le lit',           w: 100, h: 44, draw: drawBed },
+    { label: 'la baignoire',     w: 92, h: 47, draw: drawBath },
+    { label: 'la télé',          w: 56, h: 58, draw: drawTV },
+    { label: 'la bibliothèque',  w: 44, h: 62, draw: drawBookshelf },
+    { label: 'le lave-linge',    w: 44, h: 48, draw: drawWasher },
+    { label: 'le tabouret',      w: 26, h: 33, draw: drawStool },
+    { label: 'la plante verte',  w: 32, h: 49, draw: drawPlantPot },
+    { label: 'la commode',       w: 60, h: 50, draw: drawDresser },
+    { label: 'les toilettes',    w: 36, h: 49, draw: drawToilet },
+  ];
+
+  /* ---------- les trois enfants qui fuient ---------- */
+  const KID_STYLES = [
+    { skin: '#8d5524', shirt: '#42a5f5', shorts: '#546e7a', hair: '#1b1b1b' },
+    { skin: '#c68642', shirt: '#ffd54f', shorts: '#6d4c41', hair: '#3e2723' },
+    { skin: '#e0ac69', shirt: '#66bb6a', shorts: '#455a64', hair: '#1b1b1b' },
+  ];
+  function drawKid(x, fy, t, c) {
+    ctx.save();
+    ctx.translate(x, fy - 34);
+    const s = Math.sin(t * 0.6);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = c.skin; ctx.lineWidth = 3.5;   // jambes
+    ctx.beginPath(); ctx.moveTo(8, 22); ctx.lineTo(8 + s * 6, 33); ctx.moveTo(12, 22); ctx.lineTo(12 - s * 6, 33); ctx.stroke();
+    rect(5, 18, 10, 6, c.shorts);
+    rect(5, 10, 10, 10, c.shirt);
+    ctx.strokeStyle = c.skin; ctx.lineWidth = 3;     // bras en l'air
+    ctx.beginPath(); ctx.moveTo(6, 12); ctx.lineTo(1, 4 + s * 2); ctx.moveTo(14, 12); ctx.lineTo(19, 4 - s * 2); ctx.stroke();
+    ctx.fillStyle = c.skin; ctx.beginPath(); ctx.arc(10, 6, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = c.hair;
+    ctx.beginPath(); ctx.moveTo(10, 6); ctx.arc(10, 6, 6.4, Math.PI * 0.85, Math.PI * 1.9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(13, 5.5, 1.1, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(13, 9.5, 1.2, 1.7, 0, 0, 7); ctx.fill();   // bouche ouverte
+    ctx.fillStyle = '#8fd3f4';                                               // goutte de sueur
+    ctx.beginPath(); ctx.arc(3, 2.5, 1.5, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ---------- la petite Indienne ---------- */
+  function drawGirl(x, y, t, air) {
+    ctx.save();
+    ctx.translate(x, y);
+    const step = air ? 0 : Math.sin(t * 0.5);
+    const sway = air ? -2 : Math.sin(t * 0.5) * 3;
+
+    // natte
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(15, 8); ctx.quadraticCurveTo(4 + sway, 20, 8 + sway * 1.5, 38); ctx.stroke();
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath(); ctx.arc(8 + sway * 1.5, 38, 3, 0, 7); ctx.fill();
+
+    // jambes
+    const l1 = air ? 4 : step * 5, l2 = air ? -3 : -step * 5;
+    rect(17 + l1, 46, 5, 12, '#c68642');
+    rect(26 + l2, 46, 5, 12, '#c68642');
+    rect(15 + l1, 56, 8, 4, '#5b2a86');
+    rect(25 + l2, 56, 8, 4, '#5b2a86');
+
+    // bras arrière
+    ctx.strokeStyle = '#c68642'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(18, 25); ctx.lineTo(13 + step * 3, 37); ctx.stroke();
+
+    // sari
+    ctx.fillStyle = '#e91e63';
+    ctx.beginPath(); ctx.moveTo(16, 20); ctx.lineTo(32, 20); ctx.lineTo(38, 51); ctx.lineTo(10, 51); ctx.closePath(); ctx.fill();
+    rect(16, 20, 16, 8, '#00acc1');                      // blouse
+    ctx.fillStyle = '#ffb300';                           // pan du sari
+    ctx.beginPath(); ctx.moveTo(16, 20); ctx.lineTo(23, 20); ctx.lineTo(33, 50); ctx.lineTo(26, 50); ctx.closePath(); ctx.fill();
+    rect(10, 46, 28, 5, '#ffc107');                      // bordure dorée
+    rect(10, 48, 28, 1.5, '#c77800');
+
+    // tête
+    ctx.fillStyle = '#c68642';
+    ctx.beginPath(); ctx.arc(24, 11, 10, 0, 7); ctx.fill();
+    ctx.fillStyle = '#1b1b1b';                           // cheveux
+    ctx.beginPath(); ctx.moveTo(24, 11); ctx.arc(24, 11, 10.6, Math.PI * 0.8, Math.PI * 1.62); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#1b1b1b';                           // œil
+    ctx.beginPath(); ctx.arc(29, 11, 1.6, 0, 7); ctx.fill();
+    ctx.fillStyle = '#d81b60';                           // bindi
+    ctx.beginPath(); ctx.arc(31.3, 6.6, 1.5, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,110,110,.55)';             // joue
+    ctx.beginPath(); ctx.arc(27, 15.5, 2.4, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#7a2e1a'; ctx.lineWidth = 1.2;    // sourire
+    ctx.beginPath(); ctx.arc(29, 14.5, 3, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+    ctx.fillStyle = '#ffd23f';                           // boucle d'oreille
+    ctx.beginPath(); ctx.arc(21, 17, 1.6, 0, 7); ctx.fill();
+
+    // bras avant + cuillère en bois brandie
+    const hx = 38, hy = 17;
+    const ang = -1.1 + Math.sin(t * 0.35) * 0.32 - (air ? 0.25 : 0);
+    ctx.strokeStyle = '#c68642'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(30, 24); ctx.lineTo(hx, hy); ctx.stroke();
+    const ex = hx + Math.cos(ang) * 26, ey = hy + Math.sin(ang) * 26;
+    ctx.strokeStyle = '#8b5a2b'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(hx - Math.cos(ang) * 5, hy - Math.sin(ang) * 5); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.fillStyle = '#c98f4e'; ctx.strokeStyle = '#8b5a2b'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(ex + Math.cos(ang) * 4, ey + Math.sin(ang) * 4, 7, 4.6, ang, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#c68642';                           // main
+    ctx.beginPath(); ctx.arc(hx, hy, 2.6, 0, 7); ctx.fill();
+
+    ctx.restore();
+  }
+
+  /* ---------- décor ---------- */
+  const DECOR = [
+    { t: 'window', x: 80 }, { t: 'frame', x: 260 }, { t: 'plant', x: 380 },
+    { t: 'clock', x: 520 }, { t: 'window', x: 700 }, { t: 'frame', x: 880 },
+  ];
+  const DECOR_TOP = [
+    { t: 'frame', x: 60 }, { t: 'clock', x: 250 }, { t: 'frame', x: 430 },
+    { t: 'clock', x: 640 }, { t: 'frame', x: 830 },
+  ];
+  function drawDecor(d, x) {
+    if (d.t === 'window') {
+      rr(x, 40, 72, 86, 6, '#8fd3f4');
+      ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(x + 52, 62, 9, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.strokeRect(x, 40, 72, 86);
+      ctx.beginPath(); ctx.moveTo(x + 36, 40); ctx.lineTo(x + 36, 126); ctx.moveTo(x, 83); ctx.lineTo(x + 72, 83); ctx.stroke();
+      rect(x - 6, 126, 84, 5, '#e6cfa3');
+    } else if (d.t === 'frame') {
+      rect(x, 52, 44, 56, '#a0522d');
+      rect(x + 5, 57, 34, 46, '#f7d6a0');
+      ctx.fillStyle = '#7cb342';
+      ctx.beginPath(); ctx.moveTo(x + 5, 103); ctx.lineTo(x + 22, 72); ctx.lineTo(x + 39, 103); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#e57373'; ctx.beginPath(); ctx.arc(x + 30, 66, 4, 0, 7); ctx.fill();
+    } else if (d.t === 'clock') {
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 20, 72, 18, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#a0522d'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + 20, 72); ctx.lineTo(x + 20, 60); ctx.moveTo(x + 20, 72); ctx.lineTo(x + 28, 76); ctx.stroke();
+    } else if (d.t === 'plant') {
+      const ft = 232;   // repère du décor (décalé ensuite selon l'écran)
+      ctx.fillStyle = '#43a047';
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath(); ctx.ellipse(x + 18 + i * 8, ft - 48 + Math.abs(i) * 5, 6, 16, i * 0.4, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = '#c1663a';
+      ctx.beginPath(); ctx.moveTo(x + 2, ft - 30); ctx.lineTo(x + 34, ft - 30);
+      ctx.lineTo(x + 29, ft); ctx.lineTo(x + 7, ft); ctx.closePath(); ctx.fill();
+    }
+  }
+
+  /* ---------- état ---------- */
+  let state = 'ready';     // ready | run | over
+  let speed, scroll, dist, score, hi = 0;
+  let gy, vy, anim, obs, nextIn, overAt = 0, hitLabel = '';
+
+  let kids = [], lastType = null;
+
+  function reset() {
+    speed = 6; scroll = 0; dist = 0; score = 0;
+    gy = GROUND; vy = 0; anim = 0;
+    obs = []; nextIn = 300; lastType = null;
+    // trois enfants devant elle : ils détalent au départ, puis ne reviennent plus
+    kids = [
+      { x: 165, dy: -5, st: KID_STYLES[0], ph: 0,   v: 6.2 },
+      { x: 208, dy:  3, st: KID_STYLES[1], ph: 1.7, v: 5.4 },
+      { x: 250, dy: -1, st: KID_STYLES[2], ph: 3.1, v: 4.6 },
+    ];
+  }
+  reset();
+
+  function spawn() {
+    let t;
+    do { t = OB[Math.floor(Math.random() * OB.length)]; } while (t === lastType);
+    lastType = t;
+    const list = [t];
+    // petits groupes serrés (seulement des meubles étroits, pour rester sautable)
+    if (score > 250 && Math.random() < 0.3) {
+      const mates = OB.filter(o => t.w + 38 + o.w <= 120);
+      if (mates.length) list.push(mates[Math.floor(Math.random() * mates.length)]);
+    }
+    let x = W + 20, total = 0;
+    for (const d of list) { obs.push({ ...d, x }); x += d.w + 38; total += d.w + 38; }
+    // espacements très variés : serré, normal, large, grand vide
+    const r = Math.random();
+    const mult = r < 0.22 ? 0.85 : r < 0.6 ? 1.2 : r < 0.88 ? 1.8 : 2.8;
+    nextIn = total + (170 + speed * 22) * mult + Math.random() * 120;
+  }
+
+  function jump() {
+    if (gy >= GROUND) { vy = JUMP; beep(420, 820, 0.14); }
+  }
+  function action() {
+    ensureAudio();
+    if (state === 'ready') { state = 'run'; jump(); }
+    else if (state === 'over') {
+      if (performance.now() - overAt > 350) { reset(); state = 'run'; }
+    } else jump();
+  }
+
+  window.addEventListener('keydown', e => {
+    if (['Space', 'ArrowUp', 'KeyW'].includes(e.code)) {
+      e.preventDefault();
+      if (!e.repeat) action();
+    }
+  });
+  document.addEventListener('pointerdown', e => { e.preventDefault(); action(); });
+
+  /* ---------- boucle ---------- */
+  function update(dt) {
+    if (state === 'over') return;
+    anim += dt * (state === 'run' ? speed / 6 : 0.45);
+    if (state !== 'run') return;
+
+    speed = Math.min(MAXV, speed + 0.0016 * dt);
+    scroll += speed * dt;
+    dist += speed * dt;
+    score = Math.floor(dist / 12);
+
+    vy += G * dt; gy += vy * dt;
+    if (gy >= GROUND) { gy = GROUND; vy = 0; }
+
+    for (const o of obs) o.x -= speed * dt;
+    for (const k of kids) k.x += k.v * dt;
+    kids = kids.filter(k => k.x < W + 40);
+    while (obs.length && obs[0].x + obs[0].w < -10) obs.shift();
+    nextIn -= speed * dt;
+    if (nextIn <= 0) spawn();
+
+    // collisions (boîtes un peu indulgentes)
+    const gx = 50 + 14, gw = 18, gtop = gy - 60 + 6, gbot = gy - 2;
+    for (const o of obs) {
+      const ox = o.x + 5, ow = o.w - 10, otop = GROUND - o.h + 5;
+      if (gx < ox + ow && gx + gw > ox && gtop < GROUND && gbot > otop) {
+        state = 'over'; overAt = performance.now(); hitLabel = o.label;
+        if (score > hi) hi = score;
+        beep(220, 70, 0.4, 'sawtooth', 0.07);
+        break;
+      }
+    }
+  }
+
+  function draw() {
+    // mur + papier peint
+    const g = ctx.createLinearGradient(0, 0, 0, FLOOR_TOP);
+    g.addColorStop(0, '#fbe3b8'); g.addColorStop(1, '#f6dcae');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, FLOOR_TOP);
+    ctx.fillStyle = 'rgba(200,120,90,.10)';
+    for (let x = -((scroll * 0.3) % 60); x < W; x += 60) ctx.fillRect(x, 0, 28, FLOOR_TOP);
+
+    // décor (parallaxe) : rangée du haut, puis rangée du bas
+    const off = -((scroll * 0.3) % 1000);
+    const off2 = -((scroll * 0.2) % 1000);
+    const t2 = (80 + 40 + DECOR_DY) / 2 - 76;
+    ctx.save(); ctx.translate(0, t2);
+    for (const d of DECOR_TOP) { drawDecor(d, off2 + d.x); drawDecor(d, off2 + d.x + 1000); }
+    ctx.restore();
+    ctx.save(); ctx.translate(0, DECOR_DY);
+    for (const d of DECOR) { drawDecor(d, off + d.x); drawDecor(d, off + d.x + 1000); }
+    ctx.restore();
+
+    // parquet (rangées de plus en plus hautes pour donner de la profondeur)
+    rect(0, FLOOR_TOP - 8, W, 8, '#a9713a');
+    rect(0, FLOOR_TOP, W, H - FLOOR_TOP, '#d9a066');
+    ctx.strokeStyle = '#b98450'; ctx.lineWidth = 2;
+    let fy = FLOOR_TOP;
+    for (let r = 0; fy < H; r++) {
+      const rh = 22 + r * 3, sp = 90 + r * 14;
+      ctx.beginPath(); ctx.moveTo(0, fy); ctx.lineTo(W, fy); ctx.stroke();
+      const shift = (scroll * (1 + r * 0.08) + r * 37) % sp;
+      for (let x = -shift; x < W; x += sp) {
+        ctx.beginPath(); ctx.moveTo(x, fy); ctx.lineTo(x, fy + rh); ctx.stroke();
+      }
+      fy += rh;
+    }
+
+    // meubles
+    for (const o of obs) {
+      ctx.fillStyle = 'rgba(0,0,0,.16)';
+      ctx.beginPath(); ctx.ellipse(o.x + o.w / 2, GROUND + 1, o.w / 2 + 2, 4, 0, 0, 7); ctx.fill();
+      o.draw(o.x, GROUND);
+    }
+
+    // les trois enfants qui fuient
+    for (const k of kids) {
+      ctx.fillStyle = 'rgba(0,0,0,.16)';
+      ctx.beginPath(); ctx.ellipse(k.x + 10, GROUND + k.dy + 1, 9, 3, 0, 0, 7); ctx.fill();
+      drawKid(k.x, GROUND + k.dy, anim * 1.4 + k.ph, k.st);
+    }
+
+    // ombre + petite cuisinière
+    const s = Math.max(0.4, 1 - (GROUND - gy) / 300);
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.beginPath(); ctx.ellipse(74, GROUND + 1, 16 * s, 4 * s, 0, 0, 7); ctx.fill();
+    drawGirl(50, gy - 60, anim, gy < GROUND);
+
+    // titre + score
+    rr(W / 2 - 140, 14, 280, 66, 16, 'rgba(42,26,51,.82)');
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd23f';
+    ctx.font = 'bold 26px Georgia, serif';
+    ctx.fillText('let’s go mamiita', W / 2, 47);
+    ctx.fillStyle = '#fff3dc';
+    ctx.font = 'bold 15px ui-monospace, Menlo, Consolas, monospace';
+    ctx.fillText('MEILLEUR ' + pad(hi) + '   ' + pad(score), W / 2, 69);
+
+    // messages
+    const my = Math.round(H * 0.2);
+    if (state === 'ready') {
+      rr(W / 2 - 170, my, 340, 66, 14, 'rgba(42,26,51,.8)');
+      ctx.fillStyle = '#fff3dc';
+      ctx.font = 'bold 22px Georgia, serif';
+      ctx.fillText('Touche pour jouer', W / 2, my + 30);
+      ctx.font = '14px Georgia, serif';
+      ctx.fillText('et saute par-dessus les meubles !', W / 2, my + 52);
+      ctx.fillStyle = 'rgba(91,58,41,.9)';
+      ctx.font = 'bold 18px Georgia, serif';
+      ctx.fillText('👆 Touche l’écran (ou Espace) pour sauter', W / 2, Math.min(H - 40, GROUND + 100));
+    } else if (state === 'over') {
+      rr(W / 2 - 220, my, 440, 108, 14, 'rgba(42,26,51,.88)');
+      ctx.fillStyle = '#fff3dc';
+      ctx.font = 'bold 20px Georgia, serif';
+      ctx.fillText('Aïe ! Tu as heurté', W / 2, my + 32);
+      ctx.fillStyle = '#ffd23f';
+      ctx.font = 'bold 28px Georgia, serif';
+      ctx.fillText(hitLabel + ' !', W / 2, my + 66);
+      ctx.fillStyle = '#fff3dc';
+      ctx.font = '15px Georgia, serif';
+      ctx.fillText('Touche l’écran pour rejouer', W / 2, my + 92);
+    }
+  }
+
+  layout();
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', () => setTimeout(layout, 250));
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 16.667, 3);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
